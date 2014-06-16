@@ -43,7 +43,8 @@ class Numpy_rules_ufunc(AbstractTemplate):
             out = numpy_letter_types_to_numba_types(ufunc_loop[-self.key.nout:])
             if any(array_arg):
                 # if any argument was an array, the result will be an array
-                ndims = max(*[a.ndim if isinstance(a, types.Array) else 0 for a in args])
+                dims = [a.ndim if isinstance(a, types.Array) else 0 for a in args]
+                ndims = max(dims)
                 out = [types.Array(x, ndims, 'A') for x in out] 
             out.extend(args)
             return signature(*out)

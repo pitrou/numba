@@ -4,7 +4,7 @@ import warnings
 import numba.unittest_support as unittest
 import numpy as np
 from numba.compiler import compile_isolated, Flags
-from numba import types, utils
+from numba import jit, types, utils
 from numba.config import PYVERSION
 import itertools
 
@@ -30,6 +30,11 @@ def _make_binary_ufunc_usecase(ufunc_name):
     fn = ldict['fn']
     fn.__name__ = "{0}_usecase".format(ufunc_name)
     return fn
+
+
+def nsin(arr):
+    np.sin(arr)
+    return 0
 
 
 class TestUFuncs(unittest.TestCase):
@@ -863,6 +868,18 @@ class TestUFuncs(unittest.TestCase):
 
             cfunc(x, y, result)
             self.assertTrue(np.all(result == expected))
+
+    def test_aaasingle_arg_function(self):
+        # Issue #487: type inference on a function with a single argument
+        input_type = types.Array(types.float64, 1, 'A')
+        output_type = types.Array(types.int64, 1, 'C')
+        cr = compile_isolated(nsin, (input_type,),)
+                              #flags=no_pyobj_flags)
+        cfunc = cr.entry_point
+        arr = np.arange(10, dtype='f8')
+        expected = cfunc.py_func(arr)
+        got = cfunc(arr)
+        self.assertTrue(np.allclose(got, expected))
 
 
 if __name__ == '__main__':
