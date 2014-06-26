@@ -9,7 +9,7 @@ from numba import types, utils, cgutils, typing, numpy_support, errcode
 from numba.pythonapi import PythonAPI
 from numba.targets.imputils import (user_function, python_attr_impl,
                                     builtin_registry, impl_attribute)
-from numba.targets import builtins
+from numba.targets import builtins, rangeobj
 
 
 LTYPEMAP = {
@@ -34,10 +34,10 @@ LTYPEMAP = {
 STRUCT_TYPES = {
     types.complex64: builtins.Complex64,
     types.complex128: builtins.Complex128,
-    types.range_state32_type: builtins.RangeState32,
-    types.range_iter32_type: builtins.RangeIter32,
-    types.range_state64_type: builtins.RangeState64,
-    types.range_iter64_type: builtins.RangeIter64,
+    types.range_state32_type: rangeobj.RangeState32,
+    types.range_iter32_type: rangeobj.RangeIter32,
+    types.range_state64_type: rangeobj.RangeState64,
+    types.range_iter64_type: rangeobj.RangeIter64,
     types.slice3_type: builtins.Slice,
 }
 
@@ -388,6 +388,9 @@ class BaseContext(object):
         elif ty in types.signed_domain:
             return Constant.int_signextend(lty, val)
 
+        elif ty in types.unsigned_domain:
+            return Constant.int(lty, val)
+
         elif ty in types.real_domain:
             return Constant.real(lty, val)
 
@@ -628,6 +631,16 @@ class BaseContext(object):
                 tup = builder.insert_value(tup, val, idx)
             return tup
 
+        elif (types.is_int_tuple(toty) and types.is_int_tuple(fromty) and
+                len(toty) == len(fromty)):
+            olditems = cgutils.unpack_tuple(builder, val, len(fromty))
+            items = [self.cast(builder, i, t, toty.dtype)
+                     for i, t in zip(olditems, fromty.items)]
+            tup = self.get_constant_undef(toty)
+            for idx, val in enumerate(items):
+                tup = builder.insert_value(tup, val, idx)
+            return tup
+
         elif toty == types.boolean:
             return self.is_true(builder, fromty, val)
 
@@ -802,7 +815,16 @@ class BaseContext(object):
         n = len(self.exceptions) + errcode.ERROR_COUNT
         self.exceptions[n] = exc
         return n
-    
+
+    def optimize_function(self, func):
+        """
+        Perform function-level optimization.
+        This may improve generated code and reduce memory usage.
+
+        Note: This is called at the end of lowering.
+        """
+        pass
+
 
 class _wrap_impl(object):
     def __init__(self, imp, context, sig):

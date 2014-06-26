@@ -8,7 +8,9 @@ import llvm.core as lc
 from numba import errcode
 from numba import types, typing, cgutils, utils
 from numba.targets.imputils import (builtin, builtin_attr, implement,
-                                    impl_attribute, impl_attribute_generic)
+                                    impl_attribute, impl_attribute_generic,
+                                    iterator_impl)
+from numba.typing import signature
 
 #-------------------------------------------------------------------------------
 
@@ -598,6 +600,13 @@ def real_mod_impl(context, builder, sig, args):
     return rem
 
 
+def real_floordiv_impl(context, builder, sig, args):
+    x, y = args
+    cgutils.guard_zero(context, builder, y)
+    quot, _ = real_divmod(context, builder, x, y)
+    return quot
+
+
 def real_power_impl(context, builder, sig, args):
     x, y = args
     module = cgutils.get_module(builder)
@@ -698,6 +707,7 @@ for ty in types.real_domain:
     builtin(implement('-', ty, ty)(real_sub_impl))
     builtin(implement('*', ty, ty)(real_mul_impl))
     builtin(implement('/?', ty, ty)(real_div_impl))
+    builtin(implement('//', ty, ty)(real_floordiv_impl))
     builtin(implement('/', ty, ty)(real_div_impl))
     builtin(implement('%', ty, ty)(real_mod_impl))
     builtin(implement('**', ty, ty)(real_power_impl))
@@ -730,16 +740,12 @@ class Complex128(cgutils.Structure):
 def get_complex_info(ty):
     if ty == types.complex64:
         cmplxcls = Complex64
-        flty = types.float32
-
     elif ty == types.complex128:
         cmplxcls = Complex128
-        flty = types.float64
-
     else:
         raise TypeError(ty)
 
-    return cmplxcls, flty
+    return cmplxcls, ty.underlying_float
 
 
 @builtin_attr
@@ -793,7 +799,7 @@ def complex128_power_impl(context, builder, sig, args):
     with cgutils.ifelse(builder, b_is_two) as (then, otherwise):
         with then:
             # Lower as multiplication
-            res = complex_mult_impl(context, builder, sig, (ca, ca))
+            res = complex_mul_impl(context, builder, sig, (ca, ca))
             cres = Complex128(context, builder, value=res)
             c.real = cres.real
             c.imag = cres.imag
@@ -837,7 +843,7 @@ def complex_sub_impl(context, builder, sig, args):
     return z._getvalue()
 
 
-def complex_mult_impl(context, builder, sig, args):
+def complex_mul_impl(context, builder, sig, args):
     """
     (a+bi)(c+di)=(ac-bd)+i(ad+bc)
     """
@@ -914,16 +920,58 @@ def complex_positive_impl(context, builder, sig, args):
     return val
 
 
+def complex_eq_impl(context, builder, sig, args):
+    [cx, cy] = args
+    complexClass = context.make_complex(sig.args[0])
+    x = complexClass(context, builder, value=cx)
+    y = complexClass(context, builder, value=cy)
+
+    reals_are_eq = builder.fcmp(lc.FCMP_OEQ, x.real, y.real)
+    imags_are_eq = builder.fcmp(lc.FCMP_OEQ, x.imag, y.imag)
+    return builder.and_(reals_are_eq, imags_are_eq)
+
+
+def complex_ne_impl(context, builder, sig, args):
+    [cx, cy] = args
+    complexClass = context.make_complex(sig.args[0])
+    x = complexClass(context, builder, value=cx)
+    y = complexClass(context, builder, value=cy)
+
+    reals_are_ne = builder.fcmp(lc.FCMP_UNE, x.real, y.real)
+    imags_are_ne = builder.fcmp(lc.FCMP_UNE, x.imag, y.imag)
+    return builder.or_(reals_are_ne, imags_are_ne)
+
+
+def complex_abs_impl(context, builder, sig, args):
+    """
+    abs(z) := hypot(z.real, z.imag)
+    """
+    [typ] = sig.args
+    [val] = args
+    cmplxcls = context.make_complex(typ)
+    flty = typ.underlying_float
+    cmplx = cmplxcls(context, builder, val)
+    [x, y] = cmplx.real, cmplx.imag
+    hypotsig = signature(sig.return_type, flty, flty)
+    hypotimp = context.get_function(math.hypot, hypotsig)
+    return hypotimp(builder, [x, y])
+
+
 for ty, cls in zip([types.complex64, types.complex128],
                    [Complex64, Complex128]):
     builtin(implement("+", ty, ty)(complex_add_impl))
     builtin(implement("-", ty, ty)(complex_sub_impl))
-    builtin(implement("*", ty, ty)(complex_mult_impl))
+    builtin(implement("*", ty, ty)(complex_mul_impl))
     builtin(implement("/?", ty, ty)(complex_div_impl))
     builtin(implement("/", ty, ty)(complex_div_impl))
     builtin(implement("-", ty)(complex_negate_impl))
     builtin(implement("+", ty)(complex_positive_impl))
     # Complex modulo is deprecated in python3
+
+    builtin(implement('==', ty, ty)(complex_eq_impl))
+    builtin(implement('!=', ty, ty)(complex_ne_impl))
+
+    builtin(implement(types.abs_type, ty)(complex_abs_impl))
 
 
 #------------------------------------------------------------------------------
@@ -1032,245 +1080,12 @@ def slice0_none_none_impl(context, builder, sig, args):
     return slice0_empty_impl(context, builder, newsig, ())
 
 
-class RangeState32(cgutils.Structure):
-    _fields = [('start', types.int32),
-               ('stop', types.int32),
-               ('step', types.int32)]
-
-
-class RangeIter32(cgutils.Structure):
-    _fields = [('iter', types.CPointer(types.int32)),
-               ('stop', types.int32),
-               ('step', types.int32),
-               ('count', types.CPointer(types.int32))]
-
-
-class RangeState64(cgutils.Structure):
-    _fields = [('start', types.int64),
-               ('stop', types.int64),
-               ('step', types.int64)]
-
-
-class RangeIter64(cgutils.Structure):
-    _fields = [('iter', types.CPointer(types.int64)),
-               ('stop', types.int64),
-               ('step', types.int64),
-               ('count', types.CPointer(types.int64))]
-
-
 def make_unituple_iter(tupiter):
     class UniTupleIter(cgutils.Structure):
         _fields = [('index', types.CPointer(types.intp)),
                    ('tuple', tupiter.unituple,)]
 
     return UniTupleIter
-
-
-@builtin
-@implement(types.range_type, types.int32)
-def range1_32_impl(context, builder, sig, args):
-    [stop] = args
-    state = RangeState32(context, builder)
-
-    state.start = context.get_constant(types.int32, 0)
-    state.stop = stop
-    state.step = context.get_constant(types.int32, 1)
-
-    return state._getvalue()
-
-
-@builtin
-@implement(types.range_type, types.int32, types.int32)
-def range2_32_impl(context, builder, sig, args):
-    start, stop = args
-    state = RangeState32(context, builder)
-
-    state.start = start
-    state.stop = stop
-    state.step = context.get_constant(types.int32, 1)
-
-    return state._getvalue()
-
-
-@builtin
-@implement(types.range_type, types.int32, types.int32, types.int32)
-def range3_32_impl(context, builder, sig, args):
-    [start, stop, step] = args
-    state = RangeState32(context, builder)
-
-    state.start = start
-    state.stop = stop
-    state.step = step
-
-    return state._getvalue()
-
-
-def getiter_range_generic(context, builder, iterobj, start, stop, step):
-    diff = builder.sub(stop, start)
-    intty = start.type
-    zero = Constant.int(intty, 0)
-    one = Constant.int(intty, 1)
-    pos_diff = builder.icmp(lc.ICMP_SGT, diff, zero)
-    pos_step = builder.icmp(lc.ICMP_SGT, step, zero)
-    sign_differs = builder.xor(pos_diff, pos_step)
-    zero_step = builder.icmp(lc.ICMP_EQ, step, zero)
-
-    with cgutils.if_unlikely(builder, zero_step):
-        # step shouldn't be zero
-        context.return_errcode(builder, errcode.ASSERTION_ERROR)
-
-    with cgutils.ifelse(builder, sign_differs) as (then, orelse):
-        with then:
-            builder.store(zero, iterobj.count)
-
-        with orelse:
-            rem = builder.srem(diff, step)
-            uneven = builder.icmp(lc.ICMP_SGT, rem, zero)
-            newcount = builder.add(builder.sdiv(diff, step),
-                                   builder.select(uneven, one, zero))
-            builder.store(newcount, iterobj.count)
-
-    return iterobj._getvalue()
-
-
-@builtin
-@implement('getiter', types.range_state32_type)
-def getiter_range32_impl(context, builder, sig, args):
-    (value,) = args
-    state = RangeState32(context, builder, value)
-    iterobj = RangeIter32(context, builder)
-
-    start = state.start
-    stop = state.stop
-    step = state.step
-
-    startptr = cgutils.alloca_once(builder, start.type)
-    builder.store(start, startptr)
-
-    countptr = cgutils.alloca_once(builder, start.type)
-
-    iterobj.iter = startptr
-    iterobj.stop = stop
-    iterobj.step = step
-    iterobj.count = countptr
-
-    return getiter_range_generic(context, builder, iterobj, start, stop, step)
-
-
-@builtin
-@implement('iternext', types.range_iter32_type)
-def iternext_range32_impl(context, builder, sig, args):
-    (value,) = args
-    iterobj = RangeIter32(context, builder, value)
-
-    res = builder.load(iterobj.iter)
-    one = context.get_constant(types.int32, 1)
-
-    countptr = iterobj.count
-    builder.store(builder.sub(builder.load(countptr), one), countptr)
-
-    builder.store(builder.add(res, iterobj.step), iterobj.iter)
-
-    return res
-
-
-@builtin
-@implement('itervalid', types.range_iter32_type)
-def itervalid_range32_impl(context, builder, sig, args):
-    (value,) = args
-    iterobj = RangeIter32(context, builder, value)
-
-    zero = context.get_constant(types.int32, 0)
-    gt = builder.icmp(lc.ICMP_SGE, builder.load(iterobj.count), zero)
-    return gt
-
-
-@builtin
-@implement(types.range_type, types.int64)
-def range1_64_impl(context, builder, sig, args):
-    (stop,) = args
-    state = RangeState64(context, builder)
-
-    state.start = context.get_constant(types.int64, 0)
-    state.stop = stop
-    state.step = context.get_constant(types.int64, 1)
-
-    return state._getvalue()
-
-
-@builtin
-@implement(types.range_type, types.int64, types.int64)
-def range2_64_impl(context, builder, sig, args):
-    start, stop = args
-    state = RangeState64(context, builder)
-
-    state.start = start
-    state.stop = stop
-    state.step = context.get_constant(types.int64, 1)
-
-    return state._getvalue()
-
-
-@builtin
-@implement(types.range_type, types.int64, types.int64, types.int64)
-def range3_64_impl(context, builder, sig, args):
-    [start, stop, step] = args
-    state = RangeState64(context, builder)
-
-    state.start = start
-    state.stop = stop
-    state.step = step
-
-    return state._getvalue()
-
-
-@builtin
-@implement('getiter', types.range_state64_type)
-def getiter_range64_impl(context, builder, sig, args):
-    (value,) = args
-    state = RangeState64(context, builder, value)
-    iterobj = RangeIter64(context, builder)
-
-    start = state.start
-    stop = state.stop
-    step = state.step
-
-    startptr = cgutils.alloca_once(builder, start.type)
-    builder.store(start, startptr)
-
-    countptr = cgutils.alloca_once(builder, start.type)
-
-    iterobj.iter = startptr
-    iterobj.stop = stop
-    iterobj.step = step
-    iterobj.count = countptr
-
-    return getiter_range_generic(context, builder, iterobj, start, stop, step)
-
-
-@builtin
-@implement('iternext', types.range_iter64_type)
-def iternext_range64_impl(context, builder, sig, args):
-    (value,) = args
-    iterobj = RangeIter64(context, builder, value)
-
-    res = builder.load(iterobj.iter)
-    one = context.get_constant(types.int64, 1)
-    builder.store(builder.sub(builder.load(iterobj.count), one), iterobj.count)
-    builder.store(builder.add(res, iterobj.step), iterobj.iter)
-
-    return res
-
-
-@builtin
-@implement('itervalid', types.range_iter64_type)
-def itervalid_range64_impl(context, builder, sig, args):
-    (value,) = args
-    iterobj = RangeIter64(context, builder, value)
-
-    zero = context.get_constant(types.int64, 0)
-    gt = builder.icmp(lc.ICMP_SGE, builder.load(iterobj.count), zero)
-    return gt
 
 
 @builtin
@@ -1293,8 +1108,8 @@ def getiter_unituple(context, builder, sig, args):
 
 
 @builtin
-@implement('iternextsafe', types.Kind(types.UniTupleIter))
-def iternextsafe_unituple(context, builder, sig, args):
+@implement('iternext', types.Kind(types.UniTupleIter))
+def iternext_unituple(context, builder, sig, args):
     [tupiterty] = sig.args
     [tupiter] = args
 
@@ -1304,7 +1119,6 @@ def iternextsafe_unituple(context, builder, sig, args):
     idxptr = iterval.index
     idx = builder.load(idxptr)
 
-    # TODO lack out-of-bound check
     getitem_sig = typing.signature(sig.return_type, tupiterty.unituple,
                                    types.intp)
     res = getitem_unituple(context, builder, getitem_sig, [tup, idx])
@@ -1312,6 +1126,22 @@ def iternextsafe_unituple(context, builder, sig, args):
     nidx = builder.add(idx, context.get_constant(types.intp, 1))
     builder.store(nidx, iterval.index)
     return res
+
+
+@builtin
+@implement('itervalid', types.Kind(types.UniTupleIter))
+def itervalid_unituple(context, builder, sig, args):
+    [tupiterty] = sig.args
+    [tupiter] = args
+
+    tupitercls = context.make_unituple_iter(tupiterty)
+    iterval = tupitercls(context, builder, value=tupiter)
+    tup = iterval.tuple
+    idxptr = iterval.index
+    idx = builder.load(idxptr)
+    count = context.get_constant(types.intp, tupiterty.unituple.count)
+
+    return builder.icmp(lc.ICMP_SLE, idx, count)
 
 
 @builtin
@@ -1339,6 +1169,12 @@ def getitem_unituple(context, builder, sig, args):
             value = builder.extract_value(tup, i)
             builder.branch(bbend)
             phinode.add_incoming(value, bbi)
+
+    # HACK: make __getitem__(tup, len(tup)) return tup[-1], to
+    # circumvent code generation bug where iternext is emitted before
+    # itervalid (issue #569).
+    ki = context.get_constant(types.intp, tupty.count)
+    switch.add_case(ki, bbi)
 
     builder.position_at_end(bbend)
     return phinode
@@ -1776,10 +1612,14 @@ def float_impl(context, builder, sig, args):
 @implement(complex, types.VarArg)
 def complex_impl(context, builder, sig, args):
     if len(sig.args) == 1:
-        [realty] = sig.args
-        [real] = args
-        real = context.cast(builder, real, realty, types.float64)
-        imag = context.get_constant(types.float64, 0)
+        [argty] = sig.args
+        [arg] = args
+        if isinstance(argty, types.Complex):
+            # Cast Complex* to Complex128
+            return context.cast(builder, arg, argty, types.complex128)
+        else:
+            real = context.cast(builder, arg, argty, types.float64)
+            imag = context.get_constant(types.float64, 0)
 
     elif len(sig.args) == 2:
         [realty, imagty] = sig.args

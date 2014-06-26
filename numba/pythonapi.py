@@ -19,17 +19,18 @@ def fix_python_api():
     """
     Execute once to install special symbols into the LLVM symbol table
     """
+    c_helpers = _helperlib.c_helpers
     le.dylib_add_symbol("Py_None", ctypes.addressof(_PyNone))
     le.dylib_add_symbol("NumbaArrayAdaptor", _numpyadapt.get_ndarray_adaptor())
     le.dylib_add_symbol("NumbaComplexAdaptor",
-                        _helperlib.get_complex_adaptor())
+                        c_helpers["complex_adaptor"])
     le.dylib_add_symbol("NumbaNativeError", id(NativeError))
     le.dylib_add_symbol("NumbaExtractRecordData",
-                        _helperlib.get_extract_record_data())
+                        c_helpers["extract_record_data"])
     le.dylib_add_symbol("NumbaReleaseRecordBuffer",
-                        _helperlib.get_release_record_buffer())
+                        c_helpers["release_record_buffer"])
     le.dylib_add_symbol("NumbaRecreateRecord",
-                        _helperlib.get_recreate_record())
+                        c_helpers["recreate_record"])
     le.dylib_add_symbol("PyExc_NameError", id(NameError))
 
 
@@ -330,6 +331,11 @@ class PythonAPI(object):
         fn = self._get_function(fnty, name="PySequence_GetSlice")
         return self.builder.call(fn, (obj, start, stop))
 
+    def sequence_tuple(self, obj):
+        fnty = Type.function(self.pyobj, [self.pyobj])
+        fn = self._get_function(fnty, name="PySequence_Tuple")
+        return self.builder.call(fn, [obj])
+
     def string_as_string(self, strobj):
         fnty = Type.function(self.cstring, [self.pyobj])
         if PYVERSION >= (3, 0):
@@ -378,6 +384,11 @@ class PythonAPI(object):
         args = [n]
         args.extend(items)
         return self.builder.call(fn, args)
+
+    def tuple_size(self, tup):
+        fnty = Type.function(self.py_ssize_t, [self.pyobj])
+        fn = self._get_function(fnty, name="PyTuple_Size")
+        return self.builder.call(fn, [tup])
 
     def list_new(self, szval):
         fnty = Type.function(self.pyobj, [self.py_ssize_t])

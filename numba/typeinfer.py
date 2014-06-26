@@ -145,6 +145,21 @@ class BuildTupleConstrain(object):
             oset.add_types(tup)
 
 
+class ExhaustIterConstrain(object):
+
+    def __init__(self, target, count, iterator, loc):
+        self.target = target
+        self.count = count
+        self.iterator = iterator
+        self.loc = loc
+
+    def __call__(self, context, typevars):
+        oset = typevars[self.target]
+        for tp in typevars[self.iterator.name].get():
+            oset.add_types(types.UniTuple(dtype=tp.yield_type,
+                                          count=self.count))
+
+
 class CallConstrain(object):
     """Constrain for calling functions.
     Perform case analysis foreach combinations of argument types.
@@ -442,7 +457,7 @@ class TypeInferer(object):
     def typeof_const(self, inst, target, const):
         if const is True or const is False:
             self.typevars[target.name].lock(types.boolean)
-        elif isinstance(const, (int, float)):
+        elif isinstance(const, utils.INT_TYPES + (float,)):
             ty = self.context.get_number_type(const)
             self.typevars[target.name].lock(ty)
         elif const is None:
@@ -483,6 +498,7 @@ class TypeInferer(object):
             self.typevars[target.name].lock(gvty)
             self.assumed_immutables.add(inst)
 
+        # XXX this is all duplicated from/in typeof_const
         elif gvar.name in ('True', 'False'):
             assert gvar.value in (True, False)
             self.typevars[target.name].lock(types.boolean)
@@ -499,7 +515,7 @@ class TypeInferer(object):
             self.typevars[target.name].lock(types.UniTuple(gvty, 2))
             self.assumed_immutables.add(inst)
 
-        elif isinstance(gvar.value, (int, float)):
+        elif isinstance(gvar.value, utils.INT_TYPES + (float,)):
             gvty = self.context.get_number_type(gvar.value)
             self.typevars[target.name].lock(gvty)
             self.assumed_immutables.add(inst)
@@ -560,8 +576,13 @@ class TypeInferer(object):
                 self.usercalls.append((inst.value, expr.args, expr.kws))
             else:
                 self.typeof_call(inst, target, expr)
-        elif expr.op in ('getiter', 'iternext', 'iternextsafe', 'itervalid'):
+        elif expr.op in ('getiter', 'iternext', 'itervalid'):
             self.typeof_intrinsic_call(inst, target, expr.op, expr.value)
+        elif expr.op == 'exhaust_iter':
+            constrain = ExhaustIterConstrain(target.name, count=expr.count,
+                                             iterator=expr.value,
+                                             loc=expr.loc)
+            self.constrains.append(constrain)
         elif expr.op == 'binop':
             self.typeof_intrinsic_call(inst, target, expr.fn, expr.lhs, expr.rhs)
         elif expr.op == 'unary':
