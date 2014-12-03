@@ -7,11 +7,6 @@ python:
   - "3.3"
   - "3.4"
 
-branches:
-  only:
-    - master
-    - llvmlite2
-
 before_install:
   # Much faster package installation
   - sudo apt-get install -qq eatmydata
