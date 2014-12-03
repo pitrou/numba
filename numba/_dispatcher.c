@@ -5,7 +5,9 @@
 #include <assert.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/ndarrayobject.h>
+
 #include "_dispatcher.h"
+#include "_hashwrap.h"
 
 
 typedef struct DispatcherObject{
@@ -532,6 +534,7 @@ static PyTypeObject DispatcherType = {
 static PyMethodDef ext_methods[] = {
 #define declmethod(func) { #func , ( PyCFunction )func , METH_VARARGS , NULL }
     declmethod(init_types),
+    { "make_wrapper", (PyCFunction) hashwrap_make_wrapper, METH_O, NULL},
     { NULL },
 #undef declmethod
 };
@@ -556,8 +559,13 @@ MOD_INIT(_dispatcher) {
     if (PyType_Ready(&DispatcherType) < 0) {
         return MOD_ERROR_VAL;
     }
+    if (PyType_Ready(hashwrap_type) < 0) {
+        return MOD_ERROR_VAL;
+    }
     Py_INCREF(&DispatcherType);
     PyModule_AddObject(m, "Dispatcher", (PyObject*)(&DispatcherType));
+    Py_INCREF(hashwrap_type);
+    PyModule_AddObject(m, "HashWrapper", (PyObject*)(hashwrap_type));
 
     return MOD_SUCCESS_VAL(m);
 }
