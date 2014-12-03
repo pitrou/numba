@@ -13,6 +13,9 @@ branches:
     - llvmlite2
 
 before_install:
+  # Much faster package installation
+  - sudo apt-get install -qq eatmydata
+  - export LD_PRELOAD=/usr/lib/libeatmydata/libeatmydata.so
   # Install Miniconda
   - wget http://repo.continuum.io/miniconda/Miniconda3-3.7.0-Linux-x86_64.sh -O miniconda.sh
   - chmod +x miniconda.sh
