@@ -15,8 +15,6 @@ branches:
 
 before_install:
   # Install Miniconda
-  - $$1/0
-  - exit 1
   - wget http://repo.continuum.io/miniconda/Miniconda3-3.7.0-Linux-x86_64.sh -O miniconda.sh
   - chmod +x miniconda.sh
   - ./miniconda.sh -b
@@ -61,6 +59,7 @@ install:
     #- if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then cd impyla ; make ; python setup.py install; fi
 
 script:
+    - exit 1
     - cd ~ ; python -m numba.testing -v -b -m
     #- if [ ${TRAVIS_PYTHON_VERSION:0:1} == "2" ]; then cd $HOME; py.test --udf $HOME/impyla/impala/tests/test_udf_compile.py; fi
 
