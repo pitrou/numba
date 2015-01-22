@@ -7,8 +7,6 @@ import sys
 import functools
 
 import llvmlite.llvmpy.core as lc
-import llvmlite.llvmpy.ee as le
-import llvmlite.llvmpy.passes as lp
 import llvmlite.binding as ll
 
 from numba import cgutils

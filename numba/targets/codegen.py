@@ -18,6 +18,11 @@ def _is_x86(triple):
     return arch in _x86arch
 
 
+# Initialize native target
+ll.initialize_native_target()
+ll.initialize_native_asmprinter()
+
+
 class CodeLibrary(object):
     """
     An interface for bundling LLVM code together and compiling it.
