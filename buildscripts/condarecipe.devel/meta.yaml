@@ -7,8 +7,8 @@ source:
   git_tag: devel
 
 build:
-  #entry_points:
-  #  - pycc = numba.pycc:main
+  # This is needed to preserve extended setuptools metadata
+  preserve_egg_dir: yes
 
 requirements:
   build:
