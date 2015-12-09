@@ -3,8 +3,7 @@ from numba import types
 
 from .typing.typeof import typeof_impl
 
-from .targets.imputils import (builtin, builtin_attr, implement,
-                               impl_attribute, impl_attribute_generic)
+from .targets.imputils import builtin, implement
 
 
 def type_callable(func):
