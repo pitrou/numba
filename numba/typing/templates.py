@@ -342,6 +342,37 @@ class Registry(object):
         return decorate
 
 
+def _stream_list(lst):
+    def sublist_iterator(start, stop):
+        return iter(lst[start:stop])
+
+    start = 0
+    while True:
+        stop = len(lst)
+        yield sublist_iterator(start, stop)
+        start = stop
+
+
+class RegistryLoader(object):
+
+    def __init__(self, registry):
+        self._functions = _stream_list(registry.functions)
+        self._attributes = _stream_list(registry.attributes)
+        self._globals = _stream_list(registry.globals)
+
+    def new_functions(self):
+        for item in next(self._functions):
+            yield item
+
+    def new_attributes(self):
+        for item in next(self._attributes):
+            yield item
+
+    def new_globals(self):
+        for item in next(self._globals):
+            yield item
+
+
 builtin_registry = Registry()
 builtin = builtin_registry.register
 builtin_attr = builtin_registry.register_attr

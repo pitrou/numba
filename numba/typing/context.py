@@ -46,15 +46,28 @@ class BaseContext(object):
     """
 
     def __init__(self):
-        self.functions = defaultdict(list)
-        self.attributes = {}
+        # A list of installed registries
+        self._registries = {}
+        # Typing declarations extracted from the registries or other sources
+        self._functions = defaultdict(list)
+        self._attributes = {}
         self._globals = utils.UniqueDict()
         self.tm = rules.default_type_manager
-        self._load_builtins()
+        # Initialize
         self.init()
 
     def init(self):
-        pass
+        """
+        Initialize the typing context.  Can be overriden by subclasses.
+        """
+
+    def refresh(self):
+        """
+        Refresh context with new declarations from known registries.
+        Useful for third-party extensions.
+        """
+        self._load_builtins()
+        self.load_additional_registries()
 
     def explain_function_type(self, func):
         """
@@ -67,8 +80,8 @@ class BaseContext(object):
             sigs, param = func.get_call_signatures()
             defns.extend(sigs)
 
-        elif func in self.functions:
-            for tpl in self.functions[func]:
+        elif func in self._functions:
+            for tpl in self._functions[func]:
                 param = param or hasattr(tpl, 'generic')
                 defns.extend(getattr(tpl, 'cases', []))
 
@@ -92,7 +105,7 @@ class BaseContext(object):
         Resolve function type *func* for argument types *args* and *kws*.
         A signature is returned.
         """
-        defns = self.functions[func]
+        defns = self._functions[func]
         for defn in defns:
             res = defn.apply(args, kws)
             if res is not None:
@@ -114,11 +127,11 @@ class BaseContext(object):
 
     def resolve_getattr(self, value, attr):
         try:
-            attrinfo = self.attributes[value]
+            attrinfo = self._attributes[value]
         except KeyError:
             for cls in type(value).__mro__:
-                if cls in self.attributes:
-                    attrinfo = self.attributes[cls]
+                if cls in self._attributes:
+                    attrinfo = self._attributes[cls]
                     break
             else:
                 if isinstance(value, types.Module):
@@ -217,14 +230,28 @@ class BaseContext(object):
                 raise
 
     def _load_builtins(self):
-        self.install(templates.builtin_registry)
+        self.install_registry(templates.builtin_registry)
 
-    def install(self, registry):
-        for ftcls in registry.functions:
+    def load_additional_registries(self):
+        """
+        Load target-specific registries.  Can be overriden by subclasses.
+        """
+
+    def install_registry(self, registry):
+        """
+        Install a *registry* (a templates.Registry instance) of function,
+        attribute and global declarations.
+        """
+        try:
+            loader = self._registries[registry]
+        except KeyError:
+            loader = templates.RegistryLoader(registry)
+            self._registries[registry] = loader
+        for ftcls in loader.new_functions():
             self.insert_function(ftcls(self))
-        for ftcls in registry.attributes:
+        for ftcls in loader.new_attributes():
             self.insert_attributes(ftcls(self))
-        for gv, gty in registry.globals:
+        for gv, gty in loader.new_globals():
             self.insert_global(gv, gty)
 
     def _lookup_global(self, gv):
@@ -257,12 +284,12 @@ class BaseContext(object):
 
     def insert_attributes(self, at):
         key = at.key
-        assert key not in self.attributes, "Duplicated attributes template %r" % (key,)
-        self.attributes[key] = at
+        assert key not in self._attributes, "Duplicated attributes template %r" % (key,)
+        self._attributes[key] = at
 
     def insert_function(self, ft):
         key = ft.key
-        self.functions[key].append(ft)
+        self._functions[key].append(ft)
 
     def insert_overloaded(self, overloaded):
         self._insert_global(overloaded, types.Dispatcher(overloaded))
@@ -445,12 +472,12 @@ class BaseContext(object):
 
 
 class Context(BaseContext):
-    def init(self):
-        self.install(cmathdecl.registry)
-        self.install(listdecl.registry)
-        self.install(mathdecl.registry)
-        self.install(npydecl.registry)
-        self.install(operatordecl.registry)
-        self.install(randomdecl.registry)
-        self.install(cffi_utils.registry)
 
+    def load_additional_registries(self):
+        self.install_registry(cmathdecl.registry)
+        self.install_registry(listdecl.registry)
+        self.install_registry(mathdecl.registry)
+        self.install_registry(npydecl.registry)
+        self.install_registry(operatordecl.registry)
+        self.install_registry(randomdecl.registry)
+        self.install_registry(cffi_utils.registry)

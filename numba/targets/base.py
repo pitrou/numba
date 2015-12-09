@@ -17,7 +17,7 @@ from numba import _dynfunc, _helperlib
 from numba.pythonapi import PythonAPI
 from numba.targets.imputils import (user_function, user_generator,
                                     builtin_registry, impl_attribute,
-                                    impl_ret_borrowed)
+                                    impl_ret_borrowed, RegistryLoader)
 from . import (
     arrayobj, arraymath, builtins, iterators, rangeobj, optional, slicing,
     tupleobj)
@@ -164,15 +164,18 @@ class BaseContext(object):
 
     def __init__(self, typing_context):
         _load_global_helpers()
+
         self.address_size = utils.MACHINE_BITS
         self.typing_context = typing_context
 
+        # A list of installed registries
+        self._registries = {}
+        # Declarations loaded from registries and other sources
         self.defns = defaultdict(Overloads)
         self.attrs = defaultdict(Overloads)
+        # Other declarations
         self.generators = {}
         self.special_ops = {}
-
-        self.install_registry(builtin_registry)
 
         self.cached_internal_func = {}
 
@@ -185,7 +188,19 @@ class BaseContext(object):
         """
         For subclasses to add initializer
         """
-        pass
+
+    def refresh(self):
+        """
+        Refresh context with new declarations from known registries.
+        Useful for third-party extensions.
+        """
+        self.install_registry(builtin_registry)
+        self.load_additional_registries()
+
+    def load_additional_registries(self):
+        """
+        Load target-specific registries.  Can be overriden by subclasses.
+        """
 
     def get_arg_packer(self, fe_args):
         return datamodel.ArgPacker(self.data_model_manager, fe_args)
@@ -210,8 +225,13 @@ class BaseContext(object):
         Install a *registry* (a imputils.Registry instance) of function
         and attribute implementations.
         """
-        self.insert_func_defn(registry.functions)
-        self.insert_attr_defn(registry.attributes)
+        try:
+            loader = self._registries[registry]
+        except KeyError:
+            loader = RegistryLoader(registry)
+            self._registries[registry] = loader
+        self.insert_func_defn(loader.new_functions())
+        self.insert_attr_defn(loader.new_attributes())
 
     def insert_func_defn(self, defns):
         for impl, func_sigs in defns:
