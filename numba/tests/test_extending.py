@@ -48,6 +48,9 @@ def call_func1_unary(x):
 
 class TestLowLevelExtending(TestCase):
 
+    # We check with both @jit and compile_isolated(), to exercise the
+    # registration logic.
+
     def test_func1(self):
         pyfunc = call_func1_nullary
         cfunc = jit(nopython=True)(pyfunc)
