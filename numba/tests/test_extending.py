@@ -95,7 +95,7 @@ def np_where(cond, x, y):
     return np.where(cond, x, y)
 
 def call_where(cond, x, y):
-    return where(cond, x, y)
+    return where(cond, y=y, x=x)
 
 @overlay(where)
 def overlay_where(cond, x, y):
@@ -139,6 +139,9 @@ def overlay_where(cond, x, y):
                 return res
 
     else:
+        if x != y:
+            raise errors.TypingError("x and y should have the same type")
+
         def where_impl(cond, x, y):
             """
             Scalar where() => return a 0-dim array
@@ -188,10 +191,10 @@ class TestHighLevelExtending(TestCase):
             got = cfunc(*args, **kwargs)
             self.assertPreciseEqual
 
+        check(x=3, cond=True, y=8)
         check(True, 3, 8)
         check(np.bool_([True, False, True]), np.int32([1, 2, 3]),
               np.int32([4, 5, 5]))
-        check(x=3, cond=True, y=8)
 
         # The typing error is propagated
         with self.assertRaises(errors.TypingError) as raises:
