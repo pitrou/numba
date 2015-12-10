@@ -1,9 +1,10 @@
 
-from numba import types, typing
+from numba import types
 
-# Re-exported symbols
+# Exported symbols
 from .typing.typeof import typeof_impl
-from .targets.imputils import builtin, implement
+from .targets.imputils import builtin, builtin_cast, implement
+from .datamodel import models, register_default as register_model
 
 
 def type_callable(func):
@@ -31,6 +32,9 @@ def type_callable(func):
 
 
 def overlay(func):
+    # XXX Should overlay() return a jitted wrapper calling the
+    # function?  This way it would also be usable from pure Python
+    # code, like a regular jitted function
     from numba.typing.templates import builtin_global
 
     def decorate(overlay_func):

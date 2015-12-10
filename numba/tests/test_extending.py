@@ -1,17 +1,23 @@
 from __future__ import print_function, division, absolute_import
 
+from collections import namedtuple
 import math
 
 import numpy as np
 
 from numba import unittest_support as unittest
-from numba import jit, types, errors
+from numba import jit, types, errors, typeof
 from numba.compiler import compile_isolated
 from .support import TestCase
 
 from numba.extending import (typeof_impl, type_callable,
-                             builtin, implement, overlay)
+                             builtin, builtin_cast,
+                             implement, overlay,
+                             models, register_model)
 
+
+# Define a function's typing and implementation using the classical
+# two-step API
 
 def func1(x=None):
     raise NotImplementedError
@@ -47,6 +53,37 @@ def call_func1_nullary():
 def call_func1_unary(x):
     return func1(x)
 
+
+# Define a custom type and an implicit cast on it
+
+class MyDummy(object):
+    pass
+
+class MyDummyType(types.Opaque):
+
+    def can_convert_to(self, context, toty):
+        if isinstance(toty, types.Number):
+            from numba.typeconv import Conversion
+            return Conversion.safe
+
+mydummy_type = MyDummyType('mydummy')
+mydummy = MyDummy()
+
+@typeof_impl.register(MyDummy)
+def typeof_mydummy(val, c):
+    return mydummy_type
+
+@builtin_cast(MyDummyType, types.Number)
+def mydummy_to_number(context, builder, fromty, toty, val):
+    return context.get_constant(toty, 42)
+
+def get_dummy():
+    return mydummy
+
+register_model(MyDummyType)(models.OpaqueModel)
+
+
+# Define an overlaid function (combined API)
 
 def where(cond, x, y):
     raise NotImplementedError
@@ -133,6 +170,11 @@ class TestLowLevelExtending(TestCase):
         pyfunc = call_func1_unary
         cr = compile_isolated(pyfunc, (types.float64,))
         self.assertPreciseEqual(cr.entry_point(18.0), 6.0)
+
+    def test_cast_mydummy(self):
+        pyfunc = get_dummy
+        cr = compile_isolated(pyfunc, (), types.float64)
+        self.assertPreciseEqual(cr.entry_point(), 42.0)
 
 
 class TestHighLevelExtending(TestCase):
