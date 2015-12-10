@@ -1,5 +1,5 @@
 
-from numba import types
+from numba import types, typing
 
 # Re-exported symbols
 from .typing.typeof import typeof_impl
@@ -27,5 +27,17 @@ def type_callable(func):
         template = type(name, bases, class_dict)
         builtin(template)
         builtin_global(func, types.Function(template))
+
+    return decorate
+
+
+def overlay(func):
+    from numba.typing.templates import builtin_global
+
+    _cache = {}
+
+    def decorate(overlay_func):
+        ty = types.OverlayFunction(func, overlay_func)
+        builtin_global(func, ty)
 
     return decorate

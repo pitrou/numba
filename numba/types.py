@@ -326,6 +326,9 @@ class WeakType(Type):
 
 
 class Dispatcher(WeakType, Callable, Dummy):
+    """
+    Type class for @jit-compiled functions.
+    """
 
     def __init__(self, overloaded):
         self._store_object(overloaded)
@@ -354,6 +357,53 @@ class Dispatcher(WeakType, Callable, Dummy):
         A inspect.Signature object corresponding to this type.
         """
         return self.overloaded._pysig
+
+
+class OverlayFunction(Callable, Opaque):
+    """
+    Type class for @overlay-implemented functions.
+    """
+
+    def __init__(self, func, overlay_func):
+        self.overlay_func = overlay_func
+        self._impl_cache = {}
+        self._overloads = {}
+        name = "<overlay function %r>" % (func.__name__,)
+        super(OverlayFunction, self).__init__(name)
+
+    @property
+    def key(self):
+        return self.overlay_func
+
+    def get_call_type(self, context, args, kws):
+        from numba import jit
+        cache_key = args, tuple(kws.items())
+        try:
+            disp = self._impl_cache[cache_key]
+        except KeyError:
+            # Get the overlay implementation for the given types
+            pyfunc = self.overlay_func(*args, **kws)
+            if pyfunc is None:
+                # No implementation => fail typing
+                self._impl_cache[cache_key] = None
+                return
+            # Compile and type it for the given types
+            disp = self._impl_cache[cache_key] = jit(nopython=True)(pyfunc)
+
+        disp_type = Dispatcher(disp)
+        sig = disp_type.get_call_type(context, args, kws)
+        # Store the compiled overload for use in the lowering phase (get_overload())
+        self._overloads[sig.args] = disp.get_overload(sig)
+        return sig
+
+    def get_call_signatures(self):
+        sigs = []
+        for disp_type in self._impl_cache.values():
+            sigs += disp_type.get_call_signatures()[0]
+        return sigs, True
+
+    def get_overload(self, sig):
+        return self._overloads[sig]
 
 
 class ExternalFunctionPointer(Function):

@@ -2,6 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import math
 
+import numpy as np
+
 from numba import unittest_support as unittest
 from numba import jit, types
 from numba.compiler import compile_isolated
@@ -50,21 +52,45 @@ def where(cond, x=None, y=None):
     raise NotImplementedError
 
 @overlay(where)
-def where(cond, x, y):
+def where_overlay(cond, x, y):
     """
     Implement where().
     """
+
     # Choose implementation based on argument types.
-    if isinstance(cond, types.BaseTuple):
-        n = len(cond)
-        if n != len(x) or n != len(y):
-            raise TypingError("where() arguments must be the same length")
-        #if n == 0:
-            #def where_impl(cond, x, y):
-                #return ()
-        #else:
-            #def where_impl(
-        #def where_impl(cond, x, y):
+    if isinstance(cond, types.Array):
+        if x.dtype != y.dtype:
+            raise TypingError("x and y should have the same dtype")
+
+        # Array where() => return an array of the same shape
+        if all(ty.layout == 'C' for ty in (cond, x, y)):
+            def where_impl(cond, x, y):
+                """
+                Fast implementation for C-contiguous arrays
+                """
+                shape = cond.shape
+                if x.shape != shape or y.shape != shape:
+                    raise ValueError("all inputs should have the same shape")
+                res = np.empty_like(x)
+                cf = cond.flat
+                xf = x.flat
+                yf = y.flat
+                rf = res.flat
+                for i in range(cond.size):
+                    rf[i] = xf[i] if cf[i] else yf[i]
+                return res
+        else:
+            def where_impl(cond, x, y):
+                """
+                Generic implementation for other arrays
+                """
+                shape = cond.shape
+                if x.shape != shape or y.shape != shape:
+                    raise ValueError("all inputs should have the same shape")
+                res = np.empty_like(x)
+                for idx, c in np.ndenumerate(cond):
+                    res[idx] = x[idx] if c else y[idx]
+                return res
 
     else:
         def where_impl(cond, x, y):
@@ -75,6 +101,9 @@ def where(cond, x, y):
             return np.full_like(scal, scal)
 
     return where_impl
+
+def call_where(cond, x, y):
+    return where(cond, x, y)
 
 
 class TestLowLevelExtending(TestCase):
@@ -98,6 +127,19 @@ class TestLowLevelExtending(TestCase):
         pyfunc = call_func1_unary
         cr = compile_isolated(pyfunc, (types.float64,))
         self.assertPreciseEqual(cr.entry_point(18.0), 6.0)
+
+    def test_where(self):
+        pyfunc = call_where
+        cfunc = jit(nopython=True)(pyfunc)
+
+        def check(*args):
+            expected = np.where(*args)
+            got = cfunc(*args)
+            self.assertPreciseEqual
+
+        check(True, 3, 8)
+        #check(np.bool_([True, False, True]), np.int32([1, 2, 3]),
+              #np.int32([4, 5, 5]))
 
 
 if __name__ == '__main__':

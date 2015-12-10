@@ -466,6 +466,9 @@ class BaseContext(object):
         elif isinstance(fn, types.Dispatcher):
             key = fn.overloaded.get_overload(sig.args)
             overloads = self._defns[key]
+        elif isinstance(fn, types.OverlayFunction):
+            key = fn.get_overload(sig.args)
+            overloads = self._defns[key]
         else:
             key = fn
             overloads = self._defns[key]
