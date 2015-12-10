@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from numba import unittest_support as unittest
-from numba import jit, types
+from numba import jit, types, errors
 from numba.compiler import compile_isolated
 from .support import TestCase
 
@@ -48,8 +48,17 @@ def call_func1_unary(x):
     return func1(x)
 
 
-def where(cond, x=None, y=None):
+def where(cond, x, y):
     raise NotImplementedError
+
+def np_where(cond, x, y):
+    """
+    Wrap np.where() to allow for keyword arguments
+    """
+    return np.where(cond, x, y)
+
+def call_where(cond, x, y):
+    return where(cond, x, y)
 
 @overlay(where)
 def where_overlay(cond, x, y):
@@ -60,7 +69,7 @@ def where_overlay(cond, x, y):
     # Choose implementation based on argument types.
     if isinstance(cond, types.Array):
         if x.dtype != y.dtype:
-            raise TypingError("x and y should have the same dtype")
+            raise errors.TypingError("x and y should have the same dtype")
 
         # Array where() => return an array of the same shape
         if all(ty.layout == 'C' for ty in (cond, x, y)):
@@ -102,9 +111,6 @@ def where_overlay(cond, x, y):
 
     return where_impl
 
-def call_where(cond, x, y):
-    return where(cond, x, y)
-
 
 class TestLowLevelExtending(TestCase):
 
@@ -128,18 +134,28 @@ class TestLowLevelExtending(TestCase):
         cr = compile_isolated(pyfunc, (types.float64,))
         self.assertPreciseEqual(cr.entry_point(18.0), 6.0)
 
+
+class TestHighLevelExtending(TestCase):
+
     def test_where(self):
         pyfunc = call_where
         cfunc = jit(nopython=True)(pyfunc)
 
-        def check(*args):
-            expected = np.where(*args)
-            got = cfunc(*args)
+        def check(*args, **kwargs):
+            expected = np_where(*args, **kwargs)
+            got = cfunc(*args, **kwargs)
             self.assertPreciseEqual
 
         check(True, 3, 8)
-        #check(np.bool_([True, False, True]), np.int32([1, 2, 3]),
-              #np.int32([4, 5, 5]))
+        check(np.bool_([True, False, True]), np.int32([1, 2, 3]),
+              np.int32([4, 5, 5]))
+        check(x=3, cond=True, y=8)
+
+        # The typing error is propagated
+        with self.assertRaises(errors.TypingError) as raises:
+            cfunc(np.bool_([]), np.int32([]), np.int64([]))
+        self.assertIn("x and y should have the same dtype",
+                      str(raises.exception))
 
 
 if __name__ == '__main__':
