@@ -9,7 +9,69 @@ import functools
 
 from .. import typing, cgutils, types, utils
 
+
+class Registry(object):
+    """
+    A registry of function and attribute implementations.
+    """
+    def __init__(self):
+        self.functions = []
+        self.attributes = []
+        self.casts = []
+
+    def register(self, impl):
+        sigs = impl.function_signatures
+        impl.function_signatures = []
+        self.functions.append((impl, sigs))
+        return impl
+
+    def register_attr(self, item):
+        curr_item = item
+        while hasattr(curr_item, '__wrapped__'):
+            self.attributes.append(curr_item)
+            curr_item = curr_item.__wrapped__
+        return item
+
+    def register_cast(self, impl, sig):
+        self.casts.append((impl, sig))
+
+
+class RegistryLoader(object):
+    """
+    An incremental loader for a registry.  Each new call to new_functions(),
+    etc. will iterate over the not yet seen registrations.
+    """
+
+    def __init__(self, registry):
+        self._functions = utils.stream_list(registry.functions)
+        self._attributes = utils.stream_list(registry.attributes)
+        self._casts = utils.stream_list(registry.casts)
+
+    def new_functions(self):
+        for item in next(self._functions):
+            yield item
+
+    def new_attributes(self):
+        for item in next(self._attributes):
+            yield item
+
+    def new_casts(self):
+        for item in next(self._casts):
+            yield item
+
+
+# Global registries for implementations of builtin operations
+# (functions, attributes, type casts)
+builtin_registry = Registry()
+builtin = builtin_registry.register
+builtin_attr = builtin_registry.register_attr
+
+
 def implement(func, *argtys):
+    """
+    Decorator marking the decorated function as implementing *func*
+    for the given argument types.
+    """
     def wrapper(impl):
         try:
             sigs = impl.function_signatures
@@ -22,6 +84,10 @@ def implement(func, *argtys):
 
 
 def impl_attribute(ty, attr, rtype=None):
+    """
+    Decorator marking the decorated function as implementing
+    attribute *attr* for the given type.
+    """
     def wrapper(impl):
         real_impl = impl
         while hasattr(real_impl, "__wrapped__"):
@@ -43,6 +109,10 @@ def impl_attribute(ty, attr, rtype=None):
 
 
 def impl_attribute_generic(ty):
+    """
+    Decorator marking the decorated function as implementing
+    __getattr__ for the given type.
+    """
     def wrapper(impl):
         real_impl = impl
         while hasattr(real_impl, "__wrapped__"):
@@ -56,6 +126,18 @@ def impl_attribute_generic(ty):
         res.attr = None
         res.__wrapped__ = impl
         return res
+
+    return wrapper
+
+
+def builtin_cast(fromty, toty):
+    """
+    Decorator marking the decorated function as implementing
+    an implicit conversion between the given types.
+    """
+    def wrapper(impl):
+        builtin_registry.register_cast(impl, (fromty, toty))
+        return impl
 
     return wrapper
 
@@ -212,53 +294,6 @@ def call_iternext(context, builder, iterator_type, val):
     return _IternextResult(context, builder, paircls(context, builder, val))
 
 
-class Registry(object):
-    """
-    A registry of function and attribute implementations.
-    """
-
-    def __init__(self):
-        self.functions = []
-        self.attributes = []
-
-    def register(self, impl):
-        sigs = impl.function_signatures
-        impl.function_signatures = []
-        self.functions.append((impl, sigs))
-        return impl
-
-    def register_attr(self, item):
-        curr_item = item
-        while hasattr(curr_item, '__wrapped__'):
-            self.attributes.append(curr_item)
-            curr_item = curr_item.__wrapped__
-        return item
-
-
-class RegistryLoader(object):
-    """
-    An incremental loader for a registry.  Each new call to new_functions(),
-    etc. will iterate over the not yet seen registrations.
-    """
-
-    def __init__(self, registry):
-        self._functions = utils.stream_list(registry.functions)
-        self._attributes = utils.stream_list(registry.attributes)
-
-    def new_functions(self):
-        for item in next(self._functions):
-            yield item
-
-    def new_attributes(self):
-        for item in next(self._attributes):
-            yield item
-
-
-builtin_registry = Registry()
-builtin = builtin_registry.register
-builtin_attr = builtin_registry.register_attr
-
-
 def impl_ret_new_ref(ctx, builder, retty, ret):
     """
     The implementation returns a new reference.
@@ -282,4 +317,3 @@ def impl_ret_untracked(ctx, builder, retty, ret):
     The return type is not a NRT object.
     """
     return ret
-
