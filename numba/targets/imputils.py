@@ -7,7 +7,7 @@ from __future__ import print_function, absolute_import, division
 import inspect
 import functools
 
-from .. import typing, cgutils, types
+from .. import typing, cgutils, types, utils
 
 def implement(func, *argtys):
     def wrapper(impl):
@@ -213,6 +213,10 @@ def call_iternext(context, builder, iterator_type, val):
 
 
 class Registry(object):
+    """
+    A registry of function and attribute implementations.
+    """
+
     def __init__(self):
         self.functions = []
         self.attributes = []
@@ -231,22 +235,15 @@ class Registry(object):
         return item
 
 
-def _stream_list(lst):
-    def sublist_iterator(start, stop):
-        return iter(lst[start:stop])
-
-    start = 0
-    while True:
-        stop = len(lst)
-        yield sublist_iterator(start, stop)
-        start = stop
-
-
 class RegistryLoader(object):
+    """
+    An incremental loader for a registry.  Each new call to new_functions(),
+    etc. will iterate over the not yet seen registrations.
+    """
 
     def __init__(self, registry):
-        self._functions = _stream_list(registry.functions)
-        self._attributes = _stream_list(registry.attributes)
+        self._functions = utils.stream_list(registry.functions)
+        self._attributes = utils.stream_list(registry.attributes)
 
     def new_functions(self):
         for item in next(self._functions):

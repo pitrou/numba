@@ -302,6 +302,11 @@ class MacroTemplate(object):
 # -----------------------------
 
 class Registry(object):
+    """
+    A registry of typing declarations.  The registry stores such declarations
+    for functions, attributes and globals.
+    """
+
     def __init__(self):
         self.functions = []
         self.attributes = []
@@ -342,23 +347,16 @@ class Registry(object):
         return decorate
 
 
-def _stream_list(lst):
-    def sublist_iterator(start, stop):
-        return iter(lst[start:stop])
-
-    start = 0
-    while True:
-        stop = len(lst)
-        yield sublist_iterator(start, stop)
-        start = stop
-
-
 class RegistryLoader(object):
+    """
+    An incremental loader for a registry.  Each new call to new_functions(),
+    etc. will iterate over the not yet seen registrations.
+    """
 
     def __init__(self, registry):
-        self._functions = _stream_list(registry.functions)
-        self._attributes = _stream_list(registry.attributes)
-        self._globals = _stream_list(registry.globals)
+        self._functions = utils.stream_list(registry.functions)
+        self._attributes = utils.stream_list(registry.attributes)
+        self._globals = utils.stream_list(registry.globals)
 
     def new_functions(self):
         for item in next(self._functions):
