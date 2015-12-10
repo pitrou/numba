@@ -1,12 +1,16 @@
 
 from numba import types
 
+# Re-exported symbols
 from .typing.typeof import typeof_impl
-
 from .targets.imputils import builtin, implement
 
 
 def type_callable(func):
+    """
+    Decorate a function as implementing typing for the callable *func*.
+    """
+
     from numba.typing.templates import CallableTemplate, builtin, builtin_global
     try:
         func_name = func.__name__
