@@ -10,7 +10,6 @@ def type_callable(func):
     """
     Decorate a function as implementing typing for the callable *func*.
     """
-
     from numba.typing.templates import CallableTemplate, builtin, builtin_global
     try:
         func_name = func.__name__
@@ -34,10 +33,9 @@ def type_callable(func):
 def overlay(func):
     from numba.typing.templates import builtin_global
 
-    _cache = {}
-
     def decorate(overlay_func):
         ty = types.OverlayFunction(func, overlay_func)
         builtin_global(func, ty)
+        return overlay_func
 
     return decorate

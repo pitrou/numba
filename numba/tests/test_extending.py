@@ -61,7 +61,7 @@ def call_where(cond, x, y):
     return where(cond, x, y)
 
 @overlay(where)
-def where_overlay(cond, x, y):
+def overlay_where(cond, x, y):
     """
     Implement where().
     """

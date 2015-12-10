@@ -325,7 +325,7 @@ class WeakType(Type):
         return Type.__hash__(self)
 
 
-class Dispatcher(WeakType, Callable, Dummy):
+class Dispatcher(WeakType, Overloaded, Dummy):
     """
     Type class for @jit-compiled functions.
     """
@@ -358,8 +358,11 @@ class Dispatcher(WeakType, Callable, Dummy):
         """
         return self.overloaded._pysig
 
+    def get_overload(self, sig):
+        return self.overloaded.get_overload(sig.args)
 
-class OverlayFunction(Callable, Opaque):
+
+class OverlayFunction(Overloaded, Dummy):
     """
     Type class for @overlay-implemented functions.
     """
@@ -403,7 +406,7 @@ class OverlayFunction(Callable, Opaque):
         return sigs, True
 
     def get_overload(self, sig):
-        return self._overloads[sig]
+        return self._overloads[sig.args]
 
 
 class ExternalFunctionPointer(Function):

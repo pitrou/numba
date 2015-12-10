@@ -224,14 +224,28 @@ class Callable(Type):
         Using the typing *context*, resolve the callable's signature for
         the given arguments.  A signature object is returned, or None.
         """
-        pass
 
     @abstractmethod
     def get_call_signatures(self):
         """
-        Returns a tuple of (signatures, parameterized)
+        Returns a tuple of (list of signatures, parameterized)
         """
-        pass
+
+
+class Overloaded(Callable):
+    """
+    Base class for overloaded callables, i.e. callables dynamically
+    supporting multiple signatures.
+    """
+
+    @abstractmethod
+    def get_overload(self, sig):
+        """
+        Get the overload compiled for the given signature.
+        (note compilation would usually have happened at the typing
+         phase, during get_call_type())
+        """
+
 
 class DTypeSpec(Type):
     """
