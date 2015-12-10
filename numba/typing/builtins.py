@@ -373,6 +373,19 @@ class TupleLe(TupleCompare):
 class TupleLt(TupleCompare):
     key = '<'
 
+@builtin
+class TupleAdd(AbstractTemplate):
+    key = '+'
+
+    def generic(self, args, kws):
+        if len(args) == 2:
+            a, b = args
+            if (isinstance(a, types.BaseTuple) and isinstance(b, types.BaseTuple)
+                and not isinstance(a, types.BaseNamedTuple)
+                and not isinstance(b, types.BaseNamedTuple)):
+                res = types.BaseTuple.from_types(tuple(a) + tuple(b))
+                return signature(res, a, b)
+
 
 # Register default implementations of binary inplace operators for
 # immutable types.

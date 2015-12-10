@@ -36,6 +36,12 @@ def tuple_bool(context, builder, sig, args):
     else:
         return cgutils.false_bit
 
+@builtin
+@implement('+', types.BaseTuple, types.BaseTuple)
+def tuple_add(context, builder, sig, args):
+    left, right = [cgutils.unpack_tuple(builder, x) for x in args]
+    return context.make_tuple(builder, sig.return_type, left + right)
+
 def tuple_cmp_ordered(context, builder, op, sig, args):
     tu, tv = sig.args
     u, v = args

@@ -8,7 +8,7 @@ from numba.compiler import compile_isolated
 from .support import TestCase
 
 from numba.extending import (typeof_impl, type_callable,
-                             builtin, implement)
+                             builtin, implement, overlay)
 
 
 def func1(x=None):
@@ -44,6 +44,37 @@ def call_func1_nullary():
 
 def call_func1_unary(x):
     return func1(x)
+
+
+def where(cond, x=None, y=None):
+    raise NotImplementedError
+
+@overlay(where)
+def where(cond, x, y):
+    """
+    Implement where().
+    """
+    # Choose implementation based on argument types.
+    if isinstance(cond, types.BaseTuple):
+        n = len(cond)
+        if n != len(x) or n != len(y):
+            raise TypingError("where() arguments must be the same length")
+        #if n == 0:
+            #def where_impl(cond, x, y):
+                #return ()
+        #else:
+            #def where_impl(
+        #def where_impl(cond, x, y):
+
+    else:
+        def where_impl(cond, x, y):
+            """
+            Scalar where() => return a 0-dim array
+            """
+            scal = x if cond else y
+            return np.full_like(scal, scal)
+
+    return where_impl
 
 
 class TestLowLevelExtending(TestCase):
