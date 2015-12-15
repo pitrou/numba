@@ -150,7 +150,7 @@ class BaseContext(object):
         self._attrs = defaultdict(Overloads)
         self._casts = Overloads()
         # Other declarations
-        self.generators = {}
+        self._generators = {}
         self.special_ops = {}
         self.cached_internal_func = {}
 
