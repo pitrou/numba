@@ -17,12 +17,45 @@ import warnings
 import numba
 from numba import _dispatcher, compiler, utils, types
 from numba.typeconv.rules import default_type_manager
-from numba import sigutils, serialize, types, typing
+from numba import sigutils, serialize, typing
 from numba.typing.templates import fold_arguments
 from numba.typing.typeof import typeof
 from numba.bytecode import get_code_object
 from numba.six import create_bound_method, next
 from .config import NumbaWarning
+
+
+class _FunctionCompiler(object):
+
+    def __init__(self, py_func, targetdescr, targetoptions, locals):
+        self.py_func = py_func
+        self.targetdescr = targetdescr
+        self.targetoptions = targetoptions
+        self.locals = locals
+
+    def compile(self, args, return_type):
+        flags = compiler.Flags()
+        self.targetdescr.options.parse_as_flags(flags, self.targetoptions)
+
+        impl = self._get_implementation(args, return_type)
+        cres = compiler.compile_extra(self.targetdescr.typing_context,
+                                      self.targetdescr.target_context,
+                                      impl,
+                                      args=args, return_type=return_type,
+                                      flags=flags, locals=self.locals)
+        # Check typing error if object mode is used
+        if cres.typing_error is not None and not flags.enable_pyobject:
+            raise cres.typing_error
+        return cres
+
+    def _get_implementation(self, args, return_type):
+        return self.py_func
+
+
+class _IndirectFunctionCompiler(_FunctionCompiler):
+
+    def _get_implementation(self, args, return_type):
+        return self.py_func(*args)
 
 
 class _OverloadedBase(_dispatcher.Dispatcher):
@@ -258,8 +291,12 @@ class Overloaded(_OverloadedBase):
     class attribute.
     """
     _fold_args = True
+    _impl_kinds = {
+        'direct': _FunctionCompiler,
+        'indirect': _IndirectFunctionCompiler,
+        }
 
-    def __init__(self, py_func, locals={}, targetoptions={}):
+    def __init__(self, py_func, locals={}, targetoptions={}, impl_kind='direct'):
         """
         Parameters
         ----------
@@ -283,6 +320,9 @@ class Overloaded(_OverloadedBase):
         self.targetoptions = targetoptions
         self.locals = locals
         self._cache = NullCache()
+        compiler_class = self._impl_kinds[impl_kind]
+        self._compiler = compiler_class(py_func, self.targetdescr,
+                                        targetoptions, locals)
 
         self.typingctx.insert_overloaded(self)
 
@@ -340,18 +380,7 @@ class Overloaded(_OverloadedBase):
                 self.add_overload(cres)
                 return cres.entry_point
 
-            flags = compiler.Flags()
-            self.targetdescr.options.parse_as_flags(flags, self.targetoptions)
-
-            cres = compiler.compile_extra(self.typingctx, self.targetctx,
-                                          self.py_func,
-                                          args=args, return_type=return_type,
-                                          flags=flags, locals=self.locals)
-
-            # Check typing error if object mode is used
-            if cres.typing_error is not None and not flags.enable_pyobject:
-                raise cres.typing_error
-
+            cres = self._compiler.compile(args, return_type)
             self.add_overload(cres)
             self._cache.save_overload(sig, cres)
             return cres.entry_point
