@@ -10,12 +10,16 @@ UFuncCore also defines a work-stealing mechanism that allows idle threads
 to steal works from other threads.
 """
 from __future__ import print_function, absolute_import
+
 import sys
 import os
 import multiprocessing
+
 import numpy as np
+
 import llvmlite.llvmpy.core as lc
 import llvmlite.binding as ll
+
 from numba.npyufunc import ufuncbuilder
 from numba.numpy_support import as_dtype
 from numba import types, utils, cgutils
@@ -415,6 +419,45 @@ def _launch_threads():
 
     launch_threads = CFUNCTYPE(None, c_int)(lib.launch_threads)
     launch_threads(NUM_CPU)
+
+
+def _bench_func(func, args):
+    # Note: Python 3 only
+    from time import perf_counter as clock
+
+    times = []
+    for i in range(4):
+        t1 = clock()
+        func(*args)
+        t2 = clock()
+        times.append(t2 - t1)
+    return min(times)
+
+
+def _bench():
+    from . import workqueue as lib
+    _init()
+
+    def print_result(func, dt):
+        print("%20s: %d ns." % (func, dt * 1e9 / n))
+
+    n = int(3e6)
+    funcs = [("custom CAS", lib.bench_cas_wait)]
+    if os.name == 'posix':
+        funcs += [("std semaphore", lib.bench_semaphore),
+                  ("std mutex", lib.bench_mutex),
+                  ]
+    if sys.platform == 'linux':
+        funcs += [("std spinlock", lib.bench_spinlock),
+                  ]
+    if os.name == 'nt':
+        funcs += [("std semaphore", lib.bench_semaphore),
+                  ("std critical section", lib.bench_critical_section),
+                  ("std slim r/w lock", lib.bench_srw_lock),
+                  ]
+    for name, func in funcs:
+        dt = _bench_func(func, (n,))
+        print_result(name, dt)
 
 
 def _init():

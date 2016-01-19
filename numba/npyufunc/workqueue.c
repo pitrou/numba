@@ -18,6 +18,8 @@ race condition.
     /* PThread */
     #include <pthread.h>
     #include <unistd.h>
+    #include <semaphore.h>
+    #include <fcntl.h>
     #define NUMBA_PTHREAD
 #endif
 
@@ -234,9 +236,232 @@ static void reset_after_fork(void)
     queues = NULL;
 }
 
+/*
+ * Benchmark functions for synchronization primitives
+ */
+
+static volatile int dummy = 0;
+
+static PyObject *
+bench_cas_wait(PyObject *self, PyObject *args)
+{
+    int i, n;
+
+    if (!PyArg_ParseTuple(args, "i:bench_cas_wait", &n))
+        return NULL;
+
+    for (i = 0; i < n; i++) {
+        cas_wait(&dummy, dummy, dummy ^ 1);
+    }
+    Py_RETURN_NONE;
+}
+
+#ifdef NUMBA_PTHREAD
+
+static sem_t dummy_sem_val;
+static sem_t *dummy_sem;
+static pthread_mutex_t dummy_mutex;
+
+static PyObject *
+bench_posix_semaphore(PyObject *self, PyObject *args)
+{
+    int i, n;
+    int err = 0;
+
+    if (!PyArg_ParseTuple(args, "i:bench_semaphore", &n))
+        return NULL;
+
+#ifdef __APPLE__
+    dummy_sem = sem_open("/numba_bench_sem", O_CREAT, 0600, 10);
+    err = (dummy_sem == SEM_FAILED);
+#else
+    dummy_sem = &dummy_sem_val;
+    err = sem_init(dummy_sem, 0, 10);
+#endif
+
+    if (!err) {
+        for (i = 0; i < n; i++) {
+            if ((err |= sem_wait(dummy_sem)))
+                break;
+            if ((err |= sem_post(dummy_sem)))
+                break;
+        }
+#ifdef __APPLE__
+        err |= sem_close(dummy_sem);
+        err |= sem_unlink("/numba_bench_sem");
+#else
+        err |= sem_destroy(dummy_sem);
+#endif
+    }
+
+    if (err) {
+        return PyErr_SetFromErrno(PyExc_OSError);
+    }
+    else {
+        Py_RETURN_NONE;
+    }
+}
+
+static PyObject *
+bench_posix_mutex(PyObject *self, PyObject *args)
+{
+    int i, n;
+    int err = 0;
+
+    if (!PyArg_ParseTuple(args, "i:bench_mutex", &n))
+        return NULL;
+
+    err = pthread_mutex_init(&dummy_mutex, NULL);
+    if (!err) {
+        for (i = 0; i < n; i++) {
+            if ((err |= pthread_mutex_lock(&dummy_mutex)))
+                break;
+            if ((err |= pthread_mutex_unlock(&dummy_mutex)))
+                break;
+        }
+        err |= pthread_mutex_destroy(&dummy_mutex);
+    }
+
+    if (err) {
+        return PyErr_SetFromErrno(PyExc_OSError);
+    }
+    else {
+        Py_RETURN_NONE;
+    }
+}
+
+#ifdef __linux__
+static pthread_spinlock_t dummy_spinlock;
+
+static PyObject *
+bench_posix_spinlock(PyObject *self, PyObject *args)
+{
+    int i, n;
+    int err = 0;
+
+    if (!PyArg_ParseTuple(args, "i:bench_spinlock", &n))
+        return NULL;
+
+    err = pthread_spin_init(&dummy_spinlock, PTHREAD_PROCESS_PRIVATE);
+    if (!err) {
+        for (i = 0; i < n; i++) {
+            if ((err |= pthread_spin_lock(&dummy_spinlock)))
+                break;
+            if ((err |= pthread_spin_unlock(&dummy_spinlock)))
+                break;
+        }
+        err |= pthread_spin_destroy(&dummy_spinlock);
+    }
+
+    if (err) {
+        return PyErr_SetFromErrno(PyExc_OSError);
+    }
+    else {
+        Py_RETURN_NONE;
+    }
+}
+#endif
+
+#endif
+
+#ifdef NUMBA_WINTHREAD
+
+static HANDLE dummy_sem;
+static CRITICAL_SECTION dummy_cs;
+static SRWLOCK dummy_srw_lock;
+
+static PyObject *
+bench_win_semaphore(PyObject *self, PyObject *args)
+{
+    int i, n;
+    int success = 0;
+
+    if (!PyArg_ParseTuple(args, "i:bench_semaphore", &n))
+        return NULL;
+
+    dummy_sem = CreateSemaphore(NULL, 10, 20, NULL);
+    if (dummy_sem) {
+        for (i = 0; i < n; i++) {
+            if (WaitForSingleObject(dummy_sem, INFINITE) == WAIT_FAILED)
+                break;
+            if (!ReleaseSemaphore(dummy_sem, 1, NULL))
+                break;
+        }
+        success = (i == n);
+        success &= CloseHandle(dummy_sem);
+    }
+
+    if (!success) {
+        return PyErr_SetFromWindowsErr(GetLastError());
+    }
+    else {
+        Py_RETURN_NONE;
+    }
+}
+
+static PyObject *
+bench_win_critical_section(PyObject *self, PyObject *args)
+{
+    int i, n;
+
+    if (!PyArg_ParseTuple(args, "i:bench_critical_section", &n))
+        return NULL;
+
+    /* NOTE: a critical section can be used in tandem with a Windows
+       condition variable, for e.g. queue management. */
+    InitializeCriticalSection(&dummy_cs);
+    for (i = 0; i < n; i++) {
+        EnterCriticalSection(&dummy_cs);
+        dummy = i;
+        LeaveCriticalSection(&dummy_cs);
+    }
+    DeleteCriticalSection(&dummy_cs);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+bench_win_srw_lock(PyObject *self, PyObject *args)
+{
+    int i, n;
+
+    if (!PyArg_ParseTuple(args, "i:bench_srw_lock", &n))
+        return NULL;
+
+    InitializeSRWLock(&dummy_srw_lock);
+    for (i = 0; i < n; i++) {
+        AcquireSRWLockExclusive(&dummy_srw_lock);
+        dummy = i;
+        ReleaseSRWLockExclusive(&dummy_srw_lock);
+    }
+
+    Py_RETURN_NONE;
+}
+
+#endif
+
+
+static PyMethodDef methods[] = {
+    { "bench_cas_wait", (PyCFunction) bench_cas_wait, METH_VARARGS, NULL },
+#ifdef NUMBA_PTHREAD
+    { "bench_mutex", (PyCFunction) bench_posix_mutex, METH_VARARGS, NULL },
+    { "bench_semaphore", (PyCFunction) bench_posix_semaphore, METH_VARARGS, NULL },
+#ifdef __linux__
+    { "bench_spinlock", (PyCFunction) bench_posix_spinlock, METH_VARARGS, NULL },
+#endif
+#endif
+#ifdef NUMBA_WINTHREAD
+    { "bench_critical_section", (PyCFunction) bench_win_critical_section, METH_VARARGS, NULL },
+    { "bench_semaphore", (PyCFunction) bench_win_semaphore, METH_VARARGS, NULL },
+    { "bench_srw_lock", (PyCFunction) bench_win_srw_lock, METH_VARARGS, NULL },
+#endif
+    { NULL },
+};
+
+
 MOD_INIT(workqueue) {
     PyObject *m;
-    MOD_DEF(m, "workqueue", "No docs", NULL)
+    MOD_DEF(m, "workqueue", "No docs", methods)
     if (m == NULL)
         return MOD_ERROR_VAL;
 
