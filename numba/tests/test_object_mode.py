@@ -62,15 +62,6 @@ class TestObjectMode(TestCase):
         cfunc = cres.entry_point
         self.assertEqual(pyfunc(5, 5), cfunc(5, 5))
 
-        def bm_pyfunc():
-            pyfunc(5, 5)
-
-        def bm_cfunc():
-            cfunc(5, 5)
-
-        print(utils.benchmark(bm_pyfunc))
-        print(utils.benchmark(bm_cfunc))
-
     def test_array_of_object(self):
         cfunc = jit(array_of_object)
         objarr = numpy.array([object()] * 10)

@@ -158,14 +158,8 @@ class TestBlackScholes(TestCase):
         te = timer()
         jittime = te - ts
 
-        print("Python", pytime)
-        print("Numba", jittime)
-        print("Speedup: %s" % (pytime / jittime))
-
         delta = np.abs(callResultGold - callResultNumba)
         L1norm = delta.sum() / np.abs(callResultGold).sum()
-        print("L1 norm: %E" % L1norm)
-        print("Max absolute error: %E" % delta.max())
         self.assertEqual(delta.max(), 0)
 
     def test_scalar(self):
@@ -217,14 +211,8 @@ class TestBlackScholes(TestCase):
         te = timer()
         jittime = te - ts
 
-        print("Python", pytime)
-        print("Numba", jittime)
-        print("Speedup: %s" % (pytime / jittime))
-
         delta = np.abs(callResultGold - callResultNumba)
         L1norm = delta.sum() / np.abs(callResultGold).sum()
-        print("L1 norm: %E" % L1norm)
-        print("Max absolute error: %E" % delta.max())
         self.assertAlmostEqual(delta.max(), 0)
 
 

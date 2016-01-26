@@ -53,17 +53,6 @@ class TestUsecases(TestCase):
         for args in itertools.product(ss, es):
             self.assertEqual(pyfunc(*args), cfunc(*args), args)
 
-        args = 0, 500
-
-        def bm_python():
-            pyfunc(*args)
-
-        def bm_numba():
-            cfunc(*args)
-
-        print(utils.benchmark(bm_python, maxsec=.1))
-        print(utils.benchmark(bm_numba, maxsec=.1))
-
     def test_sum2d(self):
         pyfunc = usecases.sum2d
         cr = compile_isolated(pyfunc, (types.int32, types.int32))

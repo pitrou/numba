@@ -842,28 +842,6 @@ class TestUFuncs(BaseUFuncTest, TestCase):
 
     ############################################################################
     # Other tests
-    def test_binary_ufunc_performance(self):
-
-        pyfunc = _make_binary_ufunc_usecase(np.add)
-        arraytype = types.Array(types.float32, 1, 'C')
-        cr = compile_isolated(pyfunc, (arraytype, arraytype, arraytype))
-        cfunc = cr.entry_point
-
-        nelem = 5000
-        x_operand = np.arange(nelem, dtype=np.float32)
-        y_operand = np.arange(nelem, dtype=np.float32)
-        control = np.empty_like(x_operand)
-        result = np.empty_like(x_operand)
-
-        def bm_python():
-            pyfunc(x_operand, y_operand, control)
-
-        def bm_numba():
-            cfunc(x_operand, y_operand, result)
-
-        print(utils.benchmark(bm_python, maxsec=.1))
-        print(utils.benchmark(bm_numba, maxsec=.1))
-        assert np.allclose(control, result)
 
     def binary_ufunc_mixed_types_test(self, ufunc, flags=enable_pyobj_flags):
         ufunc_name = ufunc.__name__
